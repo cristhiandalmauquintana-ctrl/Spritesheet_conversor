@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="es" class="dark h-full bg-slate-900 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Extractor de Spritesheets a PNG</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- JSZip CDN para compresión de descargables en ZIP -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <style>
+    /* Estilos personalizados para soporte Pixel Art y canvas */
+    .pixelated {
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      -ms-interpolation-mode: nearest-neighbor;
+    }
+    
+    /* Personalización de barra de desplazamiento */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+
+    /* Fondo en damero (transparencia) */
+    .checkerboard {
+      background-color: #1e293b;
+      background-image: 
+        linear-gradient(45deg, #0f172a 25%, transparent 25%), 
+        linear-gradient(-45deg, #0f172a 25%, transparent 25%), 
+        linear-gradient(45deg, transparent 75%, #0f172a 75%), 
+        linear-gradient(-45deg, transparent 75%, #0f172a 75%);
+      background-size: 20px 20px;
+      background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+    }
+  </style>
+</head>
+<body class="h-full flex flex-col font-sans antialiased overflow-x-hidden selection:bg-indigo-500 selection:text-white">
+
+  <!-- Encabezado / Header -->
+  <header class="bg-slate-950 border-b border-slate-800 px-6 py-4 flex flex-wrap items-center justify-between gap-4 shrink-0 shadow-lg">
+    <div class="flex items-center space-x-3">
+      <div class="p-2.5 bg-indigo-600/20 text-indigo-400 rounded-xl border border-indigo-500/30">
+        <i class="fa-solid fa-border-all text-xl"></i>
+      </div>
+      <div>
+        <h1 class="font-bold text-lg text-white flex items-center gap-2">
+          SpriteSlicer <span class="text-xs px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">v1.0</span>
+        </h1>
+        <p class="text-xs text-slate-400">Extrae, previsualiza y descarga fotogramas individuales PNG</p>
+      </div>
+    </div>
+
+    <!-- Opciones globales -->
+    <div class="flex items-center gap-3">
+      <label class="flex items-center gap-2 text-xs text-slate-300 bg-slate-900 border border-slate-800 px-3 py-2 rounded-lg cursor-pointer hover:bg-slate-800 transition">
+        <input type="checkbox" id="togglePixelArt" checked class="rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500">
+        <i class="fa-solid fa-vector-square text-indigo-400"></i> Renderizado Pixel-Art
+      </label>
+      <button id="btnResetAll" class="text-xs bg-slate-900 border border-slate-800 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/30 text-slate-300 px-3 py-2 rounded-lg transition flex items-center gap-2">
+        <i class="fa-solid fa-rotate-left"></i> Reiniciar
+      </button>
+    </div>
+  </header>
+
+  <!-- Contenido Principal -->
+  <main class="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-hidden">
+    
+    <!-- Panel Izquierdo: Controles de Configuración -->
+    <aside class="lg:col-span-4 border-r border-slate-800 bg-slate-900/80 p-5 overflow-y-auto space-y-6 flex flex-col justify-between">
+      <div class="space-y-6">
+        
+        <!-- Carga de Archivo -->
+        <section class="space-y-2">
+          <label class="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+            <i class="fa-solid fa-upload text-indigo-400"></i> Cargar Spritesheet
+          </label>
+          <div id="dropZone" class="border-2 border-dashed border-slate-700 hover:border-indigo-500/50 bg-slate-950/50 hover:bg-indigo-950/10 transition-all rounded-xl p-5 text-center cursor-pointer group relative">
+            <input type="file" id="fileInput" accept="image/png, image/jpeg, image/webp" class="absolute inset-0 opacity-0 cursor-pointer w-full h-full">
+            <div class="space-y-2 pointer-events-none">
+              <div class="w-12 h-12 mx-auto rounded-full bg-slate-800 group-hover:bg-indigo-600/20 text-slate-400 group-hover:text-indigo-400 flex items-center justify-center transition">
+                <i class="fa-solid fa-cloud-arrow-up text-xl"></i>
+              </div>
+              <p class="text-sm font-medium text-slate-200">Arrastra tu imagen aquí o <span class="text-indigo-400 underline">explora</span></p>
+              <p class="text-xs text-slate-500">Soporta PNG, JPG, WebP (Idealmente con fondo transparente)</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Información de Imagen Cargada -->
+        <div id="imageMeta" class="hidden bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs flex justify-between items-center text-slate-300">
+          <div class="truncate max-w-[200px]">
+            <span id="metaFileName" class="font-medium text-white block truncate">filename.png</span>
+            <span id="metaDimensions" class="text-slate-500">0 x 0 px</span>
+          </div>
+          <span id="metaFramesCount" class="bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-1 rounded text-xs font-mono font-semibold">0 frames</span>
+        </div>
+
+        <!-- Modos de División -->
+        <section class="space-y-3">
+          <label class="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+            <i class="fa-solid fa-sliders text-indigo-400"></i> Modo de División
+          </label>
+          
+          <div class="grid grid-cols-2 gap-2 bg-slate-950 p-1 rounded-lg border border-slate-800">
+            <button id="modeByDimensions" class="py-1.5 px-3 rounded-md text-xs font-medium transition bg-indigo-600 text-white shadow">
+              Por Tamaño (px)
+            </button>
+            <button id="modeByGrid" class="py-1.5 px-3 rounded-md text-xs font-medium text-slate-400 hover:text-white transition">
+              Por Filas x Columnas
+            </button>
+          </div>
+
+          <!-- Campos: Por Tamaño -->
+          <div id="controlsDimensions" class="grid grid-cols-2 gap-3 pt-1">
+            <div>
+              <label class="text-xs text-slate-400 mb-1 block">Ancho Frame (px)</label>
+              <input type="number" id="frameWidth" value="32" min="1" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+            </div>
+            <div>
+              <label class="text-xs text-slate-400 mb-1 block">Alto Frame (px)</label>
+              <input type="number" id="frameHeight" value="32" min="1" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+            </div>
+          </div>
+
+          <!-- Campos: Por Grid -->
+          <div id="controlsGrid" class="grid grid-cols-2 gap-3 pt-1 hidden">
+            <div>
+              <label class="text-xs text-slate-400 mb-1 block">Columnas (X)</label>
+              <input type="number" id="gridCols" value="4" min="1" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+            </div>
+            <div>
+              <label class="text-xs text-slate-400 mb-1 block">Filas (Y)</label>
+              <input type="number" id="gridRows" value="4" min="1" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+            </div>
+          </div>
+        </section>
+
+        <!-- Ajustes de Margen y Espaciado -->
+        <section class="space-y-3 border-t border-slate-800/80 pt-4">
+          <label class="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+            <i class="fa-solid fa-arrows-up-down-left-right text-indigo-400"></i> Desplazamiento y Espaciado
+          </label>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs text-slate-400 mb-1 block">Margen X (px)</label>
+              <input type="number" id="marginX" value="0" min="0" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+            </div>
+            <div>
+              <label class="text-xs text-slate-400 mb-1 block">Margen Y (px)</label>
+              <input type="number" id="marginY" value="0" min="0" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+            </div>
+            <div>
+              <label class="text-xs text-slate-400 mb-1 block">Espaciado X (px)</label>
+              <input type="number" id="spacingX" value="0" min="0" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+            </div>
+            <div>
+              <label class="text-xs text-slate-400 mb-1 block">Espaciado Y (px)</label>
+              <input type="number" id="spacingY" value="0" min="0" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+            </div>
+          </div>
+        </section>
+
+        <!-- Opciones avanzadas (Trim / Recorte transparente) -->
+        <section class="space-y-3 border-t border-slate-800/80 pt-4">
+          <label class="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+            <i class="fa-solid fa-crop-simple text-indigo-400"></i> Ajustes Adicionales
+          </label>
+          <label class="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+            <input type="checkbox" id="chkAutoTrim" class="rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500">
+            Recortar transparencia alrededor (Trim Alpha)
+          </label>
+        </section>
+
+        <!-- Nomenclatura de Archivo -->
+        <section class="space-y-3 border-t border-slate-800/80 pt-4">
+          <label class="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+            <i class="fa-solid fa-file-signature text-indigo-400"></i> Nombre de Exportación
+          </label>
+          <div>
+            <input type="text" id="fileNamePattern" value="sprite_{index}" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 font-mono">
+            <p class="text-[11px] text-slate-500 mt-1">Usa <code class="text-indigo-400">{index}</code> o <code class="text-indigo-400">{row}_{col}</code> como comodines.</p>
+          </div>
+        </section>
+      </div>
+
+      <!-- Botón de Descarga ZIP Total -->
+      <div class="pt-6 border-t border-slate-800">
+        <button id="btnDownloadZip" disabled class="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-semibold rounded-xl shadow-lg shadow-indigo-600/20 transition flex items-center justify-center gap-2">
+          <i class="fa-solid fa-file-zipper"></i> Descargar Todos (.ZIP)
+        </button>
+      </div>
+    </aside>
+
+    <!-- Panel Central: Vista Previa e Interacción Grid -->
+    <section class="lg:col-span-8 bg-slate-950 flex flex-col h-full overflow-hidden relative">
+      
+      <!-- Toolbar del Canvas -->
+      <div class="bg-slate-900/90 border-b border-slate-800 px-4 py-2 flex justify-between items-center z-10">
+        <div class="flex items-center gap-2 text-xs text-slate-400">
+          <span class="font-medium text-slate-200">Vista de Retícula</span>
+          <span id="zoomLevelText" class="bg-slate-800 px-2 py-0.5 rounded text-slate-300">100%</span>
+        </div>
+        <div class="flex items-center gap-1">
+          <button id="btnZoomOut" title="Alejar" class="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition">
+            <i class="fa-solid fa-minus text-xs"></i>
+          </button>
+          <button id="btnZoomReset" title="Restablecer Zoom" class="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition">
+            <i class="fa-solid fa-expand text-xs"></i>
+          </button>
+          <button id="btnZoomIn" title="Acercar" class="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition">
+            <i class="fa-solid fa-plus text-xs"></i>
+          </button>
+          <div class="w-px h-4 bg-slate-800 mx-1"></div>
+          <label class="flex items-center gap-1 text-xs text-slate-400 cursor-pointer hover:text-slate-200 ml-1">
+            <input type="checkbox" id="chkShowGrid" checked class="rounded border-slate-700 bg-slate-950 text-indigo-600">
+            Grid
+          </label>
+        </div>
+      </div>
+
+      <!-- Area de Visualización con Zoom & Pan -->
+      <div id="viewportContainer" class="flex-1 overflow-hidden relative checkerboard flex items-center justify-center cursor-grab active:cursor-grabbing select-none">
+        <!-- Indicador de Espera cuando no hay imagen -->
+        <div id="emptyState" class="text-center p-6 space-y-3 max-w-sm">
+          <div class="w-16 h-16 mx-auto rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-center text-slate-600">
+            <i class="fa-regular fa-image text-3xl"></i>
+          </div>
+          <h3 class="text-slate-300 font-semibold text-base">Sin Spritesheet cargado</h3>
+          <p class="text-xs text-slate-500">Sube una imagen usando el panel izquierdo o arrástrala a esta área para comenzar el desglose.</p>
+        </div>
+
+        <!-- Wrapper Transformable para Zoom/Pan -->
+        <div id="canvasWrapper" class="absolute transform-gpu transition-transform duration-75 hidden">
+          <canvas id="spriteCanvas" class="pixelated rounded shadow-2xl block"></canvas>
+        </div>
+      </div>
+
+      <!-- Sub-panel Inferior: Animador y Galería de Fotogramas -->
+      <div class="h-64 border-t border-slate-800 bg-slate-900 flex flex-col shrink-0">
+        <!-- Pestañas del sub-panel -->
+        <div class="flex border-b border-slate-800 bg-slate-950 text-xs">
+          <button id="tabFramesBtn" class="px-4 py-2.5 font-medium border-b-2 border-indigo-500 text-indigo-400 flex items-center gap-2">
+            <i class="fa-solid fa-grip text-xs"></i> Fotogramas Extraídos (<span id="framesCountBadge">0</span>)
+          </button>
+          <button id="tabAnimBtn" class="px-4 py-2.5 font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center gap-2">
+            <i class="fa-solid fa-play text-xs"></i> Previsualización Animada
+          </button>
+        </div>
+
+        <!-- Vista 1: Galería de Frames Extraídos -->
+        <div id="viewFrames" class="flex-1 p-3 overflow-x-auto overflow-y-hidden flex items-center gap-3">
+          <p id="noFramesMsg" class="text-xs text-slate-500 w-full text-center">Carga una imagen para generar los frames.</p>
+          <div id="framesGrid" class="flex items-center gap-3 h-full"></div>
+        </div>
+
+        <!-- Vista 2: Previsualizador de Animación -->
+        <div id="viewAnim" class="flex-1 p-4 hidden flex items-center justify-center gap-6">
+          <!-- Canvas de Animación -->
+          <div class="checkerboard p-2 rounded-xl border border-slate-800 flex items-center justify-center h-36 w-36 shadow-inner relative overflow-hidden">
+            <canvas id="animCanvas" class="pixelated max-w-full max-h-full"></canvas>
+          </div>
+
+          <!-- Controles de Reproducción -->
+          <div class="space-y-4 max-w-xs flex-1">
+            <div class="flex items-center gap-3">
+              <button id="btnPlayPause" class="w-10 h-10 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center transition shadow-lg shadow-indigo-600/30">
+                <i class="fa-solid fa-pause text-sm" id="playIcon"></i>
+              </button>
+              <div class="text-xs text-slate-400 font-mono">
+                Frame: <span id="animFrameIndex" class="text-indigo-400 font-bold">1</span> / <span id="animFrameTotal">0</span>
+              </div>
+            </div>
+
+            <!-- Velocidad de Animación (FPS) -->
+            <div>
+              <div class="flex justify-between text-xs text-slate-400 mb-1">
+                <span>Velocidad (FPS)</span>
+                <span id="fpsVal" class="font-mono text-indigo-400">12 FPS</span>
+              </div>
+              <input type="range" id="fpsSlider" min="1" max="60" value="12" class="w-full accent-indigo-500 bg-slate-950 rounded-lg cursor-pointer h-1.5">
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </section>
+
+  </main>
+
+  <script>
+    // ESTADO DE LA APLICACIÓN
+    const state = {
+      image: null,
+      fileName: 'spritesheet',
+      mode: 'dimensions', // 'dimensions' | 'grid'
+      frameWidth: 32,
+      frameHeight: 32,
+      gridCols: 4,
+      gridRows: 4,
+      marginX: 0,
+      marginY: 0,
+      spacingX: 0,
+      spacingY: 0,
+      autoTrim: false,
+      pixelated: true,
+      showGrid: true,
+      zoom: 1,
+      panX: 0,
+      panY: 0,
+      isPanning: false,
+      startPanX: 0,
+      startPanY: 0,
+      extractedFrames: [], // Array de objetos { canvas, name, col, row, index }
+      
+      // Estado de Animación
+      animating: true,
+      currentAnimFrame: 0,
+      fps: 12,
+      animTimer: null
+    };
+
+    // REFERENCIAS A ELEMENTOS DOM
+    const fileInput = document.getElementById('fileInput');
+    const dropZone = document.getElementById('dropZone');
+    const imageMeta = document.getElementById('imageMeta');
+    const metaFileName = document.getElementById('metaFileName');
+    const metaDimensions = document.getElementById('metaDimensions');
+    const metaFramesCount = document.getElementById('metaFramesCount');
+    
+    // Controles
+    const modeByDimensions = document.getElementById('modeByDimensions');
+    const modeByGrid = document.getElementById('modeByGrid');
+    const controlsDimensions = document.getElementById('controlsDimensions');
+    const controlsGrid = document.getElementById('controlsGrid');
+    
+    const frameWidthInput = document.getElementById('frameWidth');
+    const frameHeightInput = document.getElementById('frameHeight');
+    const gridColsInput = document.getElementById('gridCols');
+    const gridRowsInput = document.getElementById('gridRows');
+    const marginXInput = document.getElementById('marginX');
+    const marginYInput = document.getElementById('marginY');
+    const spacingXInput = document.getElementById('spacingX');
+    const spacingYInput = document.getElementById('spacingY');
+    const chkAutoTrim = document.getElementById('chkAutoTrim');
+    const fileNamePattern = document.getElementById('fileNamePattern');
+    
+    const togglePixelArt = document.getElementById('togglePixelArt');
+    const btnResetAll = document.getElementById('btnResetAll');
+    const btnDownloadZip = document.getElementById('btnDownloadZip');
+    
+    // Canvas e Interacción
+    const viewportContainer = document.getElementById('viewportContainer');
+    const canvasWrapper = document.getElementById('canvasWrapper');
+    const spriteCanvas = document.getElementById('spriteCanvas');
+    const ctx = spriteCanvas.getContext('2d');
+    const emptyState = document.getElementById('emptyState');
+    
+    const zoomLevelText = document.getElementById('zoomLevelText');
+    const btnZoomIn = document.getElementById('btnZoomIn');
+    const btnZoomOut = document.getElementById('btnZoomOut');
+    const btnZoomReset = document.getElementById('btnZoomReset');
+    const chkShowGrid = document.getElementById('chkShowGrid');
+    
+    // Subpanel inferior
+    const tabFramesBtn = document.getElementById('tabFramesBtn');
+    const tabAnimBtn = document.getElementById('tabAnimBtn');
+    const viewFrames = document.getElementById('viewFrames');
+    const viewAnim = document.getElementById('viewAnim');
+    const framesGrid = document.getElementById('framesGrid');
+    const noFramesMsg = document.getElementById('noFramesMsg');
+    const framesCountBadge = document.getElementById('framesCountBadge');
+    
+    // Animación
+    const animCanvas = document.getElementById('animCanvas');
+    const animCtx = animCanvas.getContext('2d');
+    const btnPlayPause = document.getElementById('btnPlayPause');
+    const playIcon = document.getElementById('playIcon');
+    const animFrameIndex = document.getElementById('animFrameIndex');
+    const animFrameTotal = document.getElementById('animFrameTotal');
+    const fpsSlider = document.getElementById('fpsSlider');
+    const fpsVal = document.getElementById('fpsVal');
+
+    // CARGA DE IMÁGENES
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files[0]) {
+        loadImageFromFile(e.target.files[0]);
+      }
+    });
+
+    // Drag and Drop
+    ['dragenter', 'dragover'].forEach(eventName => {
+      dropZone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        dropZone.classList.add('border-indigo-500', 'bg-indigo-950/20');
+      }, false);
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+      dropZone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('border-indigo-500', 'bg-indigo-950/20');
+      }, false);
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+      const dt = e.dataTransfer;
+      const files = dt.files;
+      if (files && files[0]) {
+        loadImageFromFile(files[0]);
+      }
+    });
+
+    function loadImageFromFile(file) {
+      if (!file.type.match('image.*')) {
+        alert('Por favor selecciona un archivo de imagen válido.');
+        return;
+      }
+
+      state.fileName = file.name.substring(0, file.name.lastIndexOf('.')) || 'spritesheet';
+      const reader = new FileReader();
+      
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          state.image = img;
+          emptyState.classList.add('hidden');
+          canvasWrapper.classList.remove('hidden');
+          imageMeta.classList.remove('hidden');
+          
+          metaFileName.textContent = file.name;
+          metaDimensions.textContent = `${img.width} x ${img.height} px`;
+          
+          // Valores por defecto inteligentes
+          if (state.mode === 'dimensions') {
+            state.frameWidth = Math.min(32, img.width);
+            state.frameHeight = Math.min(32, img.height);
+            frameWidthInput.value = state.frameWidth;
+            frameHeightInput.value = state.frameHeight;
+          } else {
+            state.gridCols = Math.floor(img.width / 32) || 1;
+            state.gridRows = Math.floor(img.height / 32) || 1;
+            gridColsInput.value = state.gridCols;
+            gridRowsInput.value = state.gridRows;
+          }
+
+          resetZoomPan();
+          recalculateAndDraw();
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // MODOS DE DIVISIÓN
+    modeByDimensions.addEventListener('click', () => {
+      state.mode = 'dimensions';
+      modeByDimensions.className = 'py-1.5 px-3 rounded-md text-xs font-medium transition bg-indigo-600 text-white shadow';
+      modeByGrid.className = 'py-1.5 px-3 rounded-md text-xs font-medium text-slate-400 hover:text-white transition';
+      controlsDimensions.classList.remove('hidden');
+      controlsGrid.classList.add('hidden');
+      recalculateAndDraw();
+    });
+
+    modeByGrid.addEventListener('click', () => {
+      state.mode = 'grid';
+      modeByGrid.className = 'py-1.5 px-3 rounded-md text-xs font-medium transition bg-indigo-600 text-white shadow';
+      modeByDimensions.className = 'py-1.5 px-3 rounded-md text-xs font-medium text-slate-400 hover:text-white transition';
+      controlsGrid.classList.remove('hidden');
+      controlsDimensions.classList.add('hidden');
+      recalculateAndDraw();
+    });
+
+    // LISTENERS DE INPUTS DE CONFIGURACIÓN
+    [frameWidthInput, frameHeightInput, gridColsInput, gridRowsInput, marginXInput, marginYInput, spacingXInput, spacingYInput].forEach(input => {
+      input.addEventListener('input', () => {
+        updateStateFromInputs();
+        recalculateAndDraw();
+      });
+    });
+
+    chkAutoTrim.addEventListener('change', (e) => {
+      state.autoTrim = e.target.checked;
+      recalculateAndDraw();
+    });
+
+    fileNamePattern.addEventListener('input', () => {
+      updateFrameNames();
+    });
+
+    togglePixelArt.addEventListener('change', (e) => {
+      state.pixelated = e.target.checked;
+      if (state.pixelated) {
+        spriteCanvas.classList.add('pixelated');
+        animCanvas.classList.add('pixelated');
+      } else {
+        spriteCanvas.classList.remove('pixelated');
+        animCanvas.classList.remove('pixelated');
+      }
+    });
+
+    chkShowGrid.addEventListener('change', (e) => {
+      state.showGrid = e.target.checked;
+      drawCanvas();
+    });
+
+    function updateStateFromInputs() {
+      state.frameWidth = Math.max(1, parseInt(frameWidthInput.value) || 1);
+      state.frameHeight = Math.max(1, parseInt(frameHeightInput.value) || 1);
+      state.gridCols = Math.max(1, parseInt(gridColsInput.value) || 1);
+      state.gridRows = Math.max(1, parseInt(gridRowsInput.value) || 1);
+      state.marginX = Math.max(0, parseInt(marginXInput.value) || 0);
+      state.marginY = Math.max(0, parseInt(marginYInput.value) || 0);
+      state.spacingX = Math.max(0, parseInt(spacingXInput.value) || 0);
+      state.spacingY = Math.max(0, parseInt(spacingYInput.value) || 0);
+    }
+
+    // ZOOM Y PAN
+    btnZoomIn.addEventListener('click', () => applyZoom(0.25));
+    btnZoomOut.addEventListener('click', () => applyZoom(-0.25));
+    btnZoomReset.addEventListener('click', () => resetZoomPan());
+
+    viewportContainer.addEventListener('wheel', (e) => {
+      if (!state.image) return;
+      e.preventDefault();
+      const delta = e.deltaY < 0 ? 0.15 : -0.15;
+      applyZoom(delta);
+    });
+
+    function applyZoom(delta) {
+      state.zoom = Math.min(Math.max(0.25, state.zoom + delta), 8);
+      updateTransform();
+    }
+
+    function resetZoomPan() {
+      state.zoom = 1;
+      state.panX = 0;
+      state.panY = 0;
+      updateTransform();
+    }
+
+    function updateTransform() {
+      zoomLevelText.textContent = `${Math.round(state.zoom * 100)}%`;
+      canvasWrapper.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
+    }
+
+    // Lógica de arrastre Pan
+    viewportContainer.addEventListener('mousedown', (e) => {
+      if (!state.image) return;
+      state.isPanning = true;
+      state.startPanX = e.clientX - state.panX;
+      state.startPanY = e.clientY - state.panY;
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!state.isPanning) return;
+      state.panX = e.clientX - state.startPanX;
+      state.panY = e.clientY - state.startPanY;
+      updateTransform();
+    });
+
+    window.addEventListener('mouseup', () => {
+      state.isPanning = false;
+    });
+
+    // CÁLCULO Y RENDERIZADO DEL SPRITESHEET
+    function recalculateAndDraw() {
+      if (!state.image) return;
+
+      const imgW = state.image.width;
+      const imgH = state.image.height;
+
+      // Dimensiones del canvas principal
+      spriteCanvas.width = imgW;
+      spriteCanvas.height = imgH;
+
+      drawCanvas();
+      extractFrames();
+    }
+
+    function drawCanvas() {
+      if (!state.image) return;
+
+      const imgW = state.image.width;
+      const imgH = state.image.height;
+
+      ctx.clearRect(0, 0, imgW, imgH);
+      ctx.drawImage(state.image, 0, 0);
+
+      if (!state.showGrid) return;
+
+      // Dibujar Retícula
+      let fw = state.frameWidth;
+      let fh = state.frameHeight;
+      let cols = state.gridCols;
+      let rows = state.gridRows;
+
+      if (state.mode === 'dimensions') {
+        cols = Math.floor((imgW - state.marginX + state.spacingX) / (fw + state.spacingX));
+        rows = Math.floor((imgH - state.marginY + state.spacingY) / (fh + state.spacingY));
+      } else {
+        fw = Math.floor((imgW - state.marginX - (cols - 1) * state.spacingX) / cols);
+        fh = Math.floor((imgH - state.marginY - (rows - 1) * state.spacingY) / rows);
+      }
+
+      ctx.strokeStyle = 'rgba(99, 102, 241, 0.8)'; // Indigo-500
+      ctx.fillStyle = 'rgba(99, 102, 241, 0.15)';
+      ctx.lineWidth = 1;
+
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const x = state.marginX + c * (fw + state.spacingX);
+          const y = state.marginY + r * (fh + state.spacingY);
+
+          if (x + fw <= imgW && y + fh <= imgH) {
+            ctx.fillRect(x, y, fw, fh);
+            ctx.strokeRect(x + 0.5, y + 0.5, fw - 1, fh - 1);
+          }
+        }
+      }
+    }
+
+    // EXTRAER CADA FRAME A UN CANVAS INDIVIDUAL
+    function extractFrames() {
+      if (!state.image) return;
+
+      const imgW = state.image.width;
+      const imgH = state.image.height;
+
+      let fw = state.frameWidth;
+      let fh = state.frameHeight;
+      let cols = state.gridCols;
+      let rows = state.gridRows;
+
+      if (state.mode === 'dimensions') {
+        cols = Math.floor((imgW - state.marginX + state.spacingX) / (fw + state.spacingX));
+        rows = Math.floor((imgH - state.marginY + state.spacingY) / (fh + state.spacingY));
+      } else {
+        fw = Math.floor((imgW - state.marginX - (cols - 1) * state.spacingX) / cols);
+        fh = Math.floor((imgH - state.marginY - (rows - 1) * state.spacingY) / rows);
+      }
+
+      state.extractedFrames = [];
+      let index = 0;
+
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const x = state.marginX + c * (fw + state.spacingX);
+          const y = state.marginY + r * (fh + state.spacingY);
+
+          if (x + fw <= imgW && y + fh <= imgH) {
+            let frameCanvas = document.createElement('canvas');
+            frameCanvas.width = fw;
+            frameCanvas.height = fh;
+            const fCtx = frameCanvas.getContext('2d');
+
+            fCtx.drawImage(state.image, x, y, fw, fh, 0, 0, fw, fh);
+
+            // Si autoTrim está activado, recortar espacio alpha transparente
+            if (state.autoTrim) {
+              frameCanvas = trimCanvasAlpha(frameCanvas);
+            }
+
+            state.extractedFrames.push({
+              canvas: frameCanvas,
+              row: r,
+              col: c,
+              index: index,
+              name: generateFrameName(index, r, c)
+            });
+
+            index++;
+          }
+        }
+      }
+
+      metaFramesCount.textContent = `${state.extractedFrames.length} frames`;
+      framesCountBadge.textContent = state.extractedFrames.length;
+      btnDownloadZip.disabled = state.extractedFrames.length === 0;
+
+      renderFramesGallery();
+      setupAnimationPreview();
+    }
+
+    // Función de recortes (Trim Alpha)
+    function trimCanvasAlpha(canvas) {
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+      const imgData = ctx.getImageData(0, 0, w, h);
+      const data = imgData.data;
+
+      let minX = w, minY = h, maxX = -1, maxY = -1;
+
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const alpha = data[(y * w + x) * 4 + 3];
+          if (alpha > 0) {
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+
+      // Si el frame es completamente transparente
+      if (maxX < minX || maxY < minY) {
+        return canvas;
+      }
+
+      const trimmedWidth = maxX - minX + 1;
+      const trimmedHeight = maxY - minY + 1;
+
+      const trimmedCanvas = document.createElement('canvas');
+      trimmedCanvas.width = trimmedWidth;
+      trimmedCanvas.height = trimmedHeight;
+      const trimmedCtx = trimmedCanvas.getContext('2d');
+
+      trimmedCtx.drawImage(canvas, minX, minY, trimmedWidth, trimmedHeight, 0, 0, trimmedWidth, trimmedHeight);
+      return trimmedCanvas;
+    }
+
+    // Nomenclatura dinámica
+    function generateFrameName(index, row, col) {
+      let pattern = fileNamePattern.value || 'sprite_{index}';
+      const paddedIndex = String(index + 1).padStart(3, '0');
+      return pattern
+        .replace(/\{index\}/g, paddedIndex)
+        .replace(/\{row\}/g, row)
+        .replace(/\{col\}/g, col);
+    }
+
+    function updateFrameNames() {
+      state.extractedFrames.forEach((item) => {
+        item.name = generateFrameName(item.index, item.row, item.col);
+      });
+      
+      // Actualizar tooltips en galería
+      const cards = framesGrid.querySelectorAll('.frame-card');
+      cards.forEach((card, idx) => {
+        if (state.extractedFrames[idx]) {
+          card.title = state.extractedFrames[idx].name;
+        }
+      });
+    }
+
+    // DIBUJAR GALERÍA DE FRAMES EXTRAÍDOS
+    function renderFramesGallery() {
+      framesGrid.innerHTML = '';
+
+      if (state.extractedFrames.length === 0) {
+        noFramesMsg.classList.remove('hidden');
+        return;
+      }
+
+      noFramesMsg.classList.add('hidden');
+
+      state.extractedFrames.forEach((item) => {
+        const card = document.createElement('div');
+        card.className = 'frame-card group relative bg-slate-950 border border-slate-800 hover:border-indigo-500 rounded-lg p-2 flex flex-col items-center justify-between h-36 w-28 shrink-0 transition shadow';
+        card.title = item.name;
+
+        const imgContainer = document.createElement('div');
+        imgContainer.className = 'checkerboard w-full flex-1 rounded flex items-center justify-center overflow-hidden p-1 relative';
+
+        const img = document.createElement('img');
+        img.src = item.canvas.toDataURL('image/png');
+        img.className = 'max-w-full max-h-full object-contain pixelated';
+
+        imgContainer.appendChild(img);
+
+        // Botón descarga individual
+        const btnDownload = document.createElement('button');
+        btnDownload.className = 'absolute inset-0 bg-slate-950/80 text-white font-medium text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition rounded gap-1';
+        btnDownload.innerHTML = '<i class="fa-solid fa-download"></i> PNG';
+        btnDownload.onclick = () => downloadSingleFrame(item);
+
+        imgContainer.appendChild(btnDownload);
+
+        const label = document.createElement('span');
+        label.className = 'text-[10px] text-slate-400 font-mono truncate w-full text-center mt-1.5';
+        label.textContent = item.name;
+
+        card.appendChild(imgContainer);
+        card.appendChild(label);
+        framesGrid.appendChild(card);
+      });
+    }
+
+    // CONTROL DE PESTAÑAS Y ANIMACIÓN DE SPRITES
+    tabFramesBtn.addEventListener('click', () => {
+      tabFramesBtn.className = 'px-4 py-2.5 font-medium border-b-2 border-indigo-500 text-indigo-400 flex items-center gap-2';
+      tabAnimBtn.className = 'px-4 py-2.5 font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center gap-2';
+      viewFrames.classList.remove('hidden');
+      viewAnim.classList.add('hidden');
+    });
+
+    tabAnimBtn.addEventListener('click', () => {
+      tabAnimBtn.className = 'px-4 py-2.5 font-medium border-b-2 border-indigo-500 text-indigo-400 flex items-center gap-2';
+      tabFramesBtn.className = 'px-4 py-2.5 font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center gap-2';
+      viewAnim.classList.remove('hidden');
+      viewFrames.classList.add('hidden');
+      setupAnimationPreview();
+    });
+
+    function setupAnimationPreview() {
+      state.currentAnimFrame = 0;
+      animFrameTotal.textContent = state.extractedFrames.length;
+      startAnimLoop();
+    }
+
+    function startAnimLoop() {
+      clearInterval(state.animTimer);
+      if (!state.animating || state.extractedFrames.length === 0) return;
+
+      state.animTimer = setInterval(() => {
+        renderAnimFrame();
+        state.currentAnimFrame = (state.currentAnimFrame + 1) % state.extractedFrames.length;
+      }, 1000 / state.fps);
+    }
+
+    function renderAnimFrame() {
+      if (state.extractedFrames.length === 0) return;
+
+      const current = state.extractedFrames[state.currentAnimFrame];
+      if (!current) return;
+
+      animCanvas.width = current.canvas.width;
+      animCanvas.height = current.canvas.height;
+
+      animCtx.clearRect(0, 0, animCanvas.width, animCanvas.height);
+      animCtx.drawImage(current.canvas, 0, 0);
+
+      animFrameIndex.textContent = state.currentAnimFrame + 1;
+    }
+
+    btnPlayPause.addEventListener('click', () => {
+      state.animating = !state.animating;
+      if (state.animating) {
+        playIcon.className = 'fa-solid fa-pause text-sm';
+        startAnimLoop();
+      } else {
+        playIcon.className = 'fa-solid fa-play text-sm';
+        clearInterval(state.animTimer);
+      }
+    });
+
+    fpsSlider.addEventListener('input', (e) => {
+      state.fps = parseInt(e.target.value);
+      fpsVal.textContent = `${state.fps} FPS`;
+      if (state.animating) {
+        startAnimLoop();
+      }
+    });
+
+    // EXPORTACIÓN Y DESCARGAS (SINGLE & ZIP)
+    function downloadSingleFrame(item) {
+      const link = document.createElement('a');
+      link.download = `${item.name}.png`;
+      link.href = item.canvas.toDataURL('image/png');
+      link.click();
+    }
+
+    btnDownloadZip.addEventListener('click', async () => {
+      if (state.extractedFrames.length === 0) return;
+
+      btnDownloadZip.disabled = true;
+      btnDownloadZip.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Generando ZIP...';
+
+      const zip = new JSZip();
+      const folder = zip.folder("frames");
+
+      state.extractedFrames.forEach((item) => {
+        // Remover el prefijo data URL header para obtener datos base64 purificados
+        const dataUrl = item.canvas.toDataURL('image/png');
+        const base64Data = dataUrl.replace(/^data:image\/png;base64,/, "");
+        folder.file(`${item.name}.png`, base64Data, { base64: true });
+      });
+
+      try {
+        const content = await zip.generateAsync({ type: "blob" });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(content);
+        link.download = `${state.fileName}_frames.zip`;
+        link.click();
+      } catch (err) {
+        console.error("Error al generar el archivo ZIP:", err);
+        alert("Ocurrió un error al empaquetar el archivo ZIP.");
+      } finally {
+        btnDownloadZip.disabled = false;
+        btnDownloadZip.innerHTML = '<i class="fa-solid fa-file-zipper"></i> Descargar Todos (.ZIP)';
+      }
+    });
+
+    // REINICIO
+    btnResetAll.addEventListener('click', () => {
+      state.image = null;
+      state.extractedFrames = [];
+      clearInterval(state.animTimer);
+
+      fileInput.value = '';
+      emptyState.classList.remove('hidden');
+      canvasWrapper.classList.add('hidden');
+      imageMeta.classList.add('hidden');
+
+      ctx.clearRect(0, 0, spriteCanvas.width, spriteCanvas.height);
+      animCtx.clearRect(0, 0, animCanvas.width, animCanvas.height);
+
+      framesGrid.innerHTML = '';
+      noFramesMsg.classList.remove('hidden');
+      framesCountBadge.textContent = '0';
+      btnDownloadZip.disabled = true;
+    });
+
+  </script>
+</body>
+</html>
